@@ -1,0 +1,111 @@
+Description: Polly Serverless Text to Speech App
+
+# Permissions for the Lambda functions
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name that is tagged to the resources.
+    Type: String
+    Default: dev
+  AllowedRegions:
+    Type: String
+    AllowedPattern: '.+-.+-\d(,.+-.+-\d)*'
+    Description: A comma-separated list of AWS regions
+    ConstraintDescription: must contain a comma-separated list of AWS regions. We assume regions are like us-east-1 (two dashes, digit at the end)
+    Default: us-west-2
+
+Resources:
+  LambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: Polly-Text-to-Speech-App-Lambda-Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ""
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - dynamodb.amazonaws.com
+                - apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  LambdaExecutionPolicies:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: LambdaExecutionPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - polly:SynthesizeSpeech
+              - dynamodb:Query
+              - dynamodb:Scan
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - sns:Publish
+              - s3:PutObject
+              - s3:PutObjectAcl
+              - s3:GetBucketLocation
+            Resource:
+              - "*"
+      Roles:
+        - !Ref LambdaRole
+
+  PollyServerlessDynamoDB:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: postsPolly
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  AudioPostBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub polly-text-to-speech-app-${EnvironmentName}-2024
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      
+  PostNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Polly-Text-to-Speech-App
+      TopicName: PostNotificationPolly
+
+  PostReaderNewPostLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: PostReader_NewPost
+      Handler: post_handler.new_post_handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: python3.12
+      Code:
+        S3Bucket: "pollyspeechtotextapp2024"
+        S3Key: src/post_handler.zip
+      Environment:
+        Variables:
+          DB_TABLE_NAME: !Ref PollyServerlessDynamoDB
+          BUCKET_NAME: !Ref AudioPostBucket
+          SNS_TOPIC_ARN: !Ref PostNotificationTopic
+      Timeout: 60
+      MemorySize: 128
+  
